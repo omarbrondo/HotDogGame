@@ -1,4 +1,4 @@
-// Gato Callejero: plataformas 2D en HTML5 Canvas.
+// Perro Callejero: plataformas 2D en HTML5 Canvas.
 // Mismo código para navegador, Windows (Electron) y Android (Capacitor).
 (() => {
   'use strict';
@@ -12,18 +12,18 @@
   const JUMP_VELOCITY = 780;
   const ATTACK_TIME = 0.42;
   const ATTACK_COOLDOWN = 0.45;
-  const ROCK_SPEED = 560;
-  const ROCK_LIFE = 1.4;
-  const DOG_HITS = 2;
+  const ENEMY_HITS = 2;
+  const BITE_START = 0.08;
+  const BITE_END = 0.3;
   const START_LIVES = 3;
   const SPRITE_SCALE = 0.27;
   const PLAYER_BOX = { w: 40, h: 78 };
-  const DOG_BOX = { w: 56, h: 74 };
+  const ENEMY_BOX = { w: 56, h: 74 };
   const SOLID = new Set(['#', '-']);
   const FRAME_COUNTS = { walk: 5, jump: 4, attack: 4, death: 4 };
 
-  // Mapa: # suelo, - plataforma, . vacío, S inicio del gato, o moneda,
-  // d perro, F meta. Las filas más cortas se completan con vacío.
+  // Mapa: # suelo, - plataforma, . vacío, S inicio del perro, o moneda,
+  // d gato enemigo, F meta. Las filas más cortas se completan con vacío.
   const LEVELS = [
     [
       '........................................................................',
@@ -146,14 +146,15 @@
     return {
       x: spawn.x, y: spawn.y, w: PLAYER_BOX.w, h: PLAYER_BOX.h,
       vx: 0, vy: 0, facing: 1, onGround: false, hitWall: false,
-      attackT: -1, attackCd: 0, rockSpawned: false, jumpT: 1,
+      attackT: -1, attackCd: 0, hitIds: new Set(), jumpT: 1,
+      landT: 0, wasOnGround: true,
       dead: false, deadT: 0, invuln: 0, animT: 0,
     };
   }
 
-  function makeDog(x, y) {
+  function makeEnemy(x, y) {
     return {
-      x, y, w: DOG_BOX.w, h: DOG_BOX.h,
+      x, y, w: ENEMY_BOX.w, h: ENEMY_BOX.h,
       vx: 0, vy: 0, dir: -1, facing: -1, onGround: false, hitWall: false,
       hits: 0, dying: false, t: 0, remove: false, animT: 0, aware: false,
     };
@@ -167,7 +168,7 @@
       grid, cols, rows: grid.length,
       width: cols * TILE, height: grid.length * TILE,
       spawn: { x: TILE * 2, y: TILE * 2 },
-      coins: [], dogs: [], flag: null,
+      coins: [], enemies: [], flag: null,
     };
     grid.forEach((row, r) => row.forEach((ch, c) => {
       const x = c * TILE;
@@ -177,7 +178,7 @@
       } else if (ch === 'o') {
         level.coins.push({ x: x + TILE / 2, y: y + TILE / 2, taken: false });
       } else if (ch === 'd') {
-        level.dogs.push(makeDog(x + (TILE - DOG_BOX.w) / 2, y + TILE - DOG_BOX.h));
+        level.enemies.push(makeEnemy(x + (TILE - ENEMY_BOX.w) / 2, y + TILE - ENEMY_BOX.h));
       } else if (ch === 'F') {
         level.flag = { x: x + TILE / 2, y: y + TILE };
       } else {
@@ -255,8 +256,7 @@
     levelIndex: 0,
     level: null,
     player: null,
-    dogs: [],
-    rocks: [],
+    enemies: [],
     lives: START_LIVES,
     score: 0,
     levelCoins: 0,
@@ -268,8 +268,7 @@
     game.levelIndex = index;
     game.level = buildLevel(index);
     game.player = makePlayer(game.level.spawn);
-    game.dogs = game.level.dogs;
-    game.rocks = [];
+    game.enemies = game.level.enemies;
     game.levelCoins = 0;
     game.camX = clampCam(game.player.x + game.player.w / 2 - W / 2);
     game.state = 'play';
@@ -293,7 +292,7 @@
     p.vx = cause === 'pit' ? 0 : -p.facing * 120;
   }
 
-  function killDog(d) {
+  function killEnemy(d) {
     d.dying = true;
     d.t = 0;
     d.vx = 0;
@@ -306,6 +305,17 @@
   }
 
   // ---------- Actualización ----------
+  // Mordisco: golpea a los gatos delante del perro durante la parte activa del ataque.
+  function biteEnemies(p) {
+    const box = { x: p.facing > 0 ? p.x + p.w - 6 : p.x - 40, y: p.y + 14, w: 46, h: 46 };
+    for (const e of game.enemies) {
+      if (e.dying || p.hitIds.has(e) || !overlap(box, e)) continue;
+      p.hitIds.add(e);
+      e.hits += 1;
+      if (e.hits >= ENEMY_HITS) killEnemy(e);
+    }
+  }
+
   function updatePlayer(dt) {
     const p = game.player;
     const level = game.level;
@@ -329,27 +339,22 @@
     if (pressed.attack && p.attackCd <= 0 && p.attackT < 0) {
       p.attackT = 0;
       p.attackCd = ATTACK_COOLDOWN;
-      p.rockSpawned = false;
+      p.hitIds = new Set();
     }
     if (p.attackT >= 0) {
       p.attackT += dt;
-      if (!p.rockSpawned && p.attackT >= ATTACK_TIME * 0.5) {
-        p.rockSpawned = true;
-        game.rocks.push({
-          x: p.x + p.w / 2 + p.facing * 24,
-          y: p.y + 26,
-          vx: p.facing * ROCK_SPEED,
-          life: ROCK_LIFE,
-        });
-      }
+      if (p.attackT >= BITE_START && p.attackT <= BITE_END) biteEnemies(p);
       if (p.attackT >= ATTACK_TIME) p.attackT = -1;
     }
 
     moveBody(level, p, dt);
+    if (p.onGround && !p.wasOnGround) p.landT = 0.12;
+    p.landT = Math.max(0, p.landT - dt);
+    p.wasOnGround = p.onGround;
     if (p.y > level.height + TILE * 2) killPlayer(p, 'pit');
   }
 
-  function updateDog(d, dt) {
+  function updateEnemy(d, dt) {
     const level = game.level;
     const p = game.player;
 
@@ -378,24 +383,6 @@
     if (d.y > level.height + TILE * 4) d.remove = true;
   }
 
-  function updateRocks(dt) {
-    const level = game.level;
-    for (const rock of game.rocks) {
-      rock.x += rock.vx * dt;
-      rock.life -= dt;
-      if (solidAt(level, Math.floor(rock.x / TILE), Math.floor(rock.y / TILE))) rock.life = 0;
-      for (const d of game.dogs) {
-        if (d.dying || d.remove || rock.life <= 0) continue;
-        const hit = rock.x > d.x && rock.x < d.x + d.w && rock.y > d.y && rock.y < d.y + d.h;
-        if (!hit) continue;
-        rock.life = 0;
-        d.hits += 1;
-        if (d.hits >= DOG_HITS) killDog(d);
-      }
-    }
-    game.rocks = game.rocks.filter((r) => r.life > 0);
-  }
-
   function onPlayerDeathEnd() {
     game.lives -= 1;
     if (game.lives <= 0) {
@@ -420,15 +407,14 @@
     updatePlayer(dt);
     if (p.dead) return;
 
-    for (const d of game.dogs) updateDog(d, dt);
-    game.dogs = game.dogs.filter((d) => !d.remove);
-    updateRocks(dt);
+    for (const d of game.enemies) updateEnemy(d, dt);
+    game.enemies = game.enemies.filter((d) => !d.remove);
 
-    for (const d of game.dogs) {
+    for (const d of game.enemies) {
       if (d.dying || !overlap(p, d)) continue;
       const feetAboveTop = p.y + p.h - d.y < 26;
       if (p.vy > 0 && feetAboveTop) {
-        killDog(d);
+        killEnemy(d);
         p.vy = -460;
       } else if (p.invuln <= 0) {
         killPlayer(p, 'dog');
@@ -599,37 +585,18 @@
   function playerFrame(p) {
     if (p.dead) return ['death', Math.min(Math.floor(p.deadT * 6), 3)];
     if (p.attackT >= 0) return ['attack', Math.min(Math.floor((p.attackT / ATTACK_TIME) * 4), 3)];
-    if (!p.onGround) {
-      if (p.vy < -120) return ['jump', 1];
-      if (p.vy > 120) return ['jump', 3];
-      return ['jump', 2];
-    }
+    if (p.landT > 0) return ['jump', 3];
+    if (!p.onGround) return ['jump', p.vy < -120 ? 1 : 2];
     if (Math.abs(p.vx) > 1) return ['walk', Math.floor(p.animT * 9) % FRAME_COUNTS.walk];
     return ['walk', 0];
   }
 
-  function dogFrame(d) {
+  function enemyFrame(d) {
     if (d.dying) return ['death', Math.min(Math.floor(d.t * 4), 3)];
     if (d.aware && Math.abs(game.player.x - d.x) < 80) {
       return ['attack', Math.floor(d.animT * 8) % FRAME_COUNTS.attack];
     }
     return ['walk', Math.floor(d.animT * 7) % FRAME_COUNTS.walk];
-  }
-
-  function drawRocks(offsetY) {
-    for (const rock of game.rocks) {
-      ctx.save();
-      ctx.translate(rock.x, offsetY + rock.y);
-      ctx.rotate(rock.life * 12);
-      ctx.beginPath();
-      ctx.arc(0, 0, 9, 0, Math.PI * 2);
-      ctx.fillStyle = '#7d7f86';
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#373940';
-      ctx.stroke();
-      ctx.restore();
-    }
   }
 
   function drawHud() {
@@ -674,16 +641,15 @@
     drawTiles(level, game.camX, offsetY);
     drawCoins(level, offsetY);
     drawFlag(level, offsetY);
-    for (const d of game.dogs) {
-      const [anim, idx] = dogFrame(d);
-      drawCharacter('dog', anim, idx, d, d.facing, offsetY);
+    for (const d of game.enemies) {
+      const [anim, idx] = enemyFrame(d);
+      drawCharacter('cat', anim, idx, d, d.facing, offsetY);
     }
-    drawRocks(offsetY);
     const p = game.player;
     const blink = p.invuln > 0 && Math.floor(game.time * 12) % 2 === 0;
     ctx.globalAlpha = blink ? 0.35 : 1;
     const [pAnim, pIdx] = playerFrame(p);
-    drawCharacter('cat', pAnim, pIdx, p, p.facing, offsetY);
+    drawCharacter('dog', pAnim, pIdx, p, p.facing, offsetY);
     ctx.globalAlpha = 1;
     ctx.restore();
 
@@ -691,11 +657,11 @@
 
     const coinsTotal = game.score + game.levelCoins;
     if (game.state === 'title') {
-      drawOverlay('GATO CALLEJERO', [
+      drawOverlay('PERRO CALLEJERO', [
         'Enter / Espacio / tocar para jugar',
         '← → o A D: mover   ·   Espacio / W: saltar',
-        'J / X: lanzar roca   ·   P: pausa',
-        'Aplasta a los perros desde arriba',
+        'J / X: morder   ·   P: pausa',
+        'Aplasta a los gatos o muérdelos dos veces',
       ]);
     } else if (game.state === 'paused') {
       drawOverlay('PAUSA', ['P para continuar']);

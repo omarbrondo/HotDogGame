@@ -14,7 +14,7 @@
   },
   "build": {
     "appId": "com.example.gatocallejero",
-    "productName": "Gato Callejero",
+    "productName": "Perro Callejero",
     "directories": { "output": "dist" },
     "files": [
       "index.html",

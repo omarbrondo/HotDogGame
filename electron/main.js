@@ -9,7 +9,7 @@ function createWindow() {
     minHeight: 360,
     backgroundColor: '#000000',
     autoHideMenuBar: true,
-    title: 'Gato Callejero',
+    title: 'Perro Callejero',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
