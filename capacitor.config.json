@@ -1,0 +1,8 @@
+{
+  "appId": "com.example.gatocallejero",
+  "appName": "Gato Callejero",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}

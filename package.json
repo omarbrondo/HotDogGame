@@ -1,0 +1,35 @@
+{
+  "name": "gato-callejero",
+  "version": "1.0.0",
+  "description": "Juego de plataformas 2D para Windows y Android (HTML5 Canvas + Electron + Capacitor)",
+  "main": "electron/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build:web": "node scripts/build-web.js",
+    "dist:win": "npm run build:web && electron-builder --win",
+    "android:init": "npm run build:web && cap add android",
+    "android:sync": "npm run build:web && cap sync android",
+    "android:open": "cap open android"
+  },
+  "build": {
+    "appId": "com.example.gatocallejero",
+    "productName": "Gato Callejero",
+    "directories": { "output": "dist" },
+    "files": [
+      "index.html",
+      "js/**/*",
+      "assets/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": { "target": "nsis" }
+  },
+  "devDependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/cli": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}
